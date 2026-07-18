@@ -10,8 +10,12 @@ defmodule ZongziFeasibility.Declaration.Pitch do
     上下文，不做 tick↔frame 换算；由 Caller 在挂载与编辑时把 boundary /
     control_points 换算成帧，缓存进 `payload.frames`。
   - 结构编辑（move / drag）后由 Caller 平移 payload 与 snapshot 的坐标；
-    focus split 由 Caller 注入 `:split_hint`，`on_rebase/3` 消费并产出两个子
+    focus split 由 Caller 注入 `:split_hint`，`on_rebase/4` 消费并产出两个子
     intervention（payload-boundary 决策）。
+
+  `on_rebase/4` 的第 4 参 `context` 是 Caller 注入 `rebase_all` 的
+  `Anchor.Context`（含 `notes_by_seq`，可做 tick 级维护）；frame 级信息
+  （采样率/tempo 换算）context 不携带，仍由 Caller 经 split_hint 提供。
 
   ## payload 形状
 
@@ -92,7 +96,7 @@ defmodule ZongziFeasibility.Declaration.Pitch do
   # ------------------------------------------------------------------
 
   @impl true
-  def on_rebase(%Intervention{payload: %{split_hint: hint}} = int, meta, _tl) do
+  def on_rebase(%Intervention{payload: %{split_hint: hint}} = int, meta, _tl, _ctx) do
     payload = Map.delete(int.payload, :split_hint)
     split_tick = hint.tick
     split_frame = hint.frame
@@ -140,7 +144,7 @@ defmodule ZongziFeasibility.Declaration.Pitch do
     {:split, [child_a, child_b]}
   end
 
-  def on_rebase(int, _meta, _tl), do: {:ok, int}
+  def on_rebase(int, _meta, _tl, _ctx), do: {:ok, int}
 
   # ------------------------------------------------------------------
   # helpers

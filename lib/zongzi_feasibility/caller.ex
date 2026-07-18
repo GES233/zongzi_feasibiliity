@@ -145,11 +145,10 @@ defmodule ZongziFeasibility.Caller do
   """
   def edit(caller, op) do
     {:ok, caller, op_desc} = apply_op(caller, op)
-    before = caller.interventions
 
     ctx = Anchor.Context.new(notes_by_seq: caller.notes_by_seq)
 
-    %{survived: survived, conflicts: conflicts} =
+    %{survived: survived, conflicts: conflicts, decisions: decisions} =
       Anchor.rebase_all(caller.interventions, caller.timeline, ctx)
 
     survived =
@@ -167,38 +166,10 @@ defmodule ZongziFeasibility.Caller do
       survived: survived,
       conflicts: conflicts,
       segments: segments,
-      decisions: compute_decisions(before, survived, conflicts)
+      decisions: decisions
     }
 
     {caller, report}
-  end
-
-  # 决策标注：preserve（锚未变）/ rebase（focus 不变锚变）/ relocate（focus 换）/
-  # split（on_rebase 子干预）/ conflict。供 Measurer 统计结构决策分布。
-  defp compute_decisions(before, survived, conflicts) do
-    before_by_id = Map.new(before, &{&1.id, &1})
-
-    survived_decisions =
-      Map.new(survived, fn int ->
-        decision =
-          case Map.fetch(before_by_id, int.id) do
-            :error ->
-              :split
-
-            {:ok, old} ->
-              cond do
-                old.anchor == int.anchor -> :preserve
-                focus(old) == focus(int) -> :rebase
-                true -> :relocate
-              end
-          end
-
-        {int.id, decision}
-      end)
-
-    conflict_decisions = Map.new(conflicts, fn {int, _reason} -> {int.id, :conflict} end)
-
-    Map.merge(survived_decisions, conflict_decisions)
   end
 
   defp apply_op(caller, {:edit_lyric, seq, lyric}) do

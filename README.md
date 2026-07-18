@@ -15,13 +15,20 @@ zongzi 核三个库外角色的**可执行参考实现 + 验证台**：
 ## 配置
 
 ```elixir
-# config/config.exs
-config :zongzi_feasibility,
-  python: "D:/Conda/python.exe",          # toy 引擎解释器
-  engine_cli: "priv/scripts/engine_cli.py"
+# config/config.exs — Pythonx（uv 管理的隔离 Python 环境）
+config :pythonx, :uv_init,
+  pyproject_toml: """
+  [project]
+  name = "zongzi-svs"
+  version = "0.1.0"
+  requires-python = ">=3.11"
+  dependencies = ["numpy", "matplotlib"]
+  """
 ```
 
-Python 依赖：`priv/scripts/requirements.txt`（numpy + matplotlib）。
+Python 桥为 `ZongziFeasibility.Engine.Python`（Pythonx.eval 直调 `priv/scripts/` 的
+engine/engine_cli），无需系统 Python；`priv/scripts/requirements.txt` 仅供
+ standalone 运行 `engine_cli.py` 时使用。
 
 ## 跑验证
 
@@ -46,7 +53,7 @@ toy 引擎的 preutterance 与歌词联动（`N = preutterance_frames + len(lyri
 lib/zongzi_feasibility/
   caller.ex             # Caller 编排（编辑回路 + 坐标换算）
   engine.ex             # Zongzi.Engine behaviour（check/render）
-  engine/python.ex      # System.cmd → engine_cli.py 桥
+  engine/python.ex      # Pythonx → priv/scripts 直调桥
   declaration/pitch.ex  # Zongzi.Intervention.Declaration 实现（:pitch）
   scenario.ex           # golden scenario 契约
   scenarios/            # G-INT/G-ENG/G-PRE 场景
