@@ -12,7 +12,7 @@ defmodule ZongziFeasibility.MixProject do
   end
 
   def application do
-    [extra_applications: [:logger]]
+    [extra_applications: [:logger, :pythonx]]
   end
 
   defp deps do

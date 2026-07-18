@@ -1,48 +1,45 @@
 defmodule ZongziFeasibility.Engine.Python do
   @moduledoc """
-  `System.cmd` → `engine_cli.py` 的 JSON 桥。
+  Pythonx → engine.py 直调桥（替代 System.cmd）。
 
-  只暴露 `run/1`：request map 写临时 JSON 文件，路径作 argv[1] 传给 CLI
-  （`System.cmd` 没有 `:input` 选项，stdin 管道不可行），stdout 收 response。
-
-  Python 解释器与脚本路径走 config：
-
-      config :zongzi_feasibility,
-        python: "D:/Conda/python.exe",
-        engine_cli: "priv/scripts/engine_cli.py"
+  通过 Pythonx.eval/2 直接调用 Python 引擎，避免 subprocess + 临时文件开销。
+  request body 以 JSON 字符串传入 Python 侧，json.loads 解析后分发给 engine_cli 的 DISPATCH。
   """
 
   @spec run(map()) :: {:ok, map()} | {:error, String.t()}
   def run(body) when is_map(body) do
-    # System.cmd 没有 :input 选项；request 写临时文件，路径作 argv[1] 传给 CLI。
-    path =
-      Path.join(
-        System.tmp_dir!(),
-        "zongzi_feasibility_req_#{System.unique_integer([:positive])}.json"
+    json_str = Jason.encode!(body)
+    scripts = Path.join(File.cwd!(), "priv/scripts")
+
+    {result, _globals} =
+      Pythonx.eval(
+        """
+        import json, sys
+
+        sys.path.insert(0, r\"#{scripts}\")
+        from engine import Engine
+        from engine_cli import DISPATCH
+
+        engine = Engine()
+        req = json.loads(json_str)
+        action = req.get('action', 'project')
+        handler = DISPATCH[action]
+        result = handler(req)
+        json.dumps(result)
+        """,
+        %{"json_str" => json_str}
       )
 
-    File.write!(path, Jason.encode!(body))
-
-    try do
-      case System.cmd(python(), [cli(), path], stderr_to_stdout: true) do
-        {output, 0} -> decode(output)
-        {output, n} -> {:error, "engine_cli exit #{n}: #{String.slice(output, 0, 300)}"}
-      end
-    after
-      File.rm(path)
+    case Jason.decode(Pythonx.decode(result)) do
+      {:ok, %{"error" => err}} -> {:error, err}
+      {:ok, data} -> {:ok, data}
+      {:error, _} -> {:error, "JSON decode failed: #{String.slice(inspect(result), 0, 200)}"}
     end
   rescue
-    e in ErlangError -> {:error, "python spawn failed: #{Exception.message(e)}"}
-  end
+    e in RuntimeError ->
+      {:error, "pythonx eval failed: #{Exception.message(e)}"}
 
-  defp decode(output) do
-    case Jason.decode(output) do
-      {:ok, %{"error" => err}} -> {:error, err}
-      {:ok, result} -> {:ok, result}
-      {:error, _} -> {:error, "JSON decode failed: #{String.slice(output, 0, 300)}"}
-    end
+    e in Pythonx.Error ->
+      {:error, "python exception: #{Exception.message(e)}"}
   end
-
-  defp python, do: Application.get_env(:zongzi_feasibility, :python, "python")
-  defp cli, do: Application.get_env(:zongzi_feasibility, :engine_cli, "priv/scripts/engine_cli.py")
 end
