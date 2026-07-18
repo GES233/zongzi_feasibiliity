@@ -1,22 +1,28 @@
 """
-CLI bridge: reads JSON request from stdin, writes JSON response to stdout.
+CLI bridge: reads a JSON request, writes JSON response to stdout.
 Replaces the FastAPI server for local smoke testing.
 
 Usage:
+    python engine_cli.py [request.json]   # argv[1] = request file; no arg → stdin
     python engine_cli.py < request.json > response.json
 
-Request format (stdin):
-    {
-        "action": "project" | "apply" | "visualize",
-        "notes": [...],
-        "tempo_segments": [...],
-        "sample_rate": 86.13,
-        "interventions": [...]   # for "apply" and "visualize"
+Request format:
+    {"action": "project",
+     "notes": [...], "tempo_segments": [...], "sample_rate": 86.13,
+     "preutterance_frames": 0, "window": [start_tick, end_tick]  # optional
     }
+    -> {"projection": [[frame, pitch, vuv], ...], "spills": [[f0, f1], ...]}
 
-Response format (stdout):
-    {"baseline": {...}, "applied": {...}, "n_frames": N}
-    or {"path": "output/..."} for visualize action
+    {"action": "visualize",
+     "baseline": [[f, p, v], ...], "applied": [[f, p, v], ...],
+     "spills": [[f0, f1], ...], "notes": [...],
+     "tempo_segments": [...], "sample_rate": 86.13,
+     "interventions": [{"id", "boundary": [f0, f1], "status"}],
+     "output_dir": "...",  # optional, defaults to priv/output
+     "tag": "round_001"}
+    -> {"path": "<absolute path to PNG>"}
+
+Errors: {"error": "..."} on stdout, exit code 1.
 """
 from __future__ import annotations
 
@@ -27,66 +33,54 @@ from pathlib import Path
 from engine import Engine
 from visualize import plot_comparison
 
-OUTPUT_DIR = Path(__file__).parent.parent / "output"
-OUTPUT_DIR.mkdir(exist_ok=True)
+# priv/scripts/engine_cli.py -> priv/output
+DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent.parent / "output"
 
 engine = Engine()
 
 
 def handle_project(req: dict) -> dict:
-    baseline = engine.project(
+    return engine.project(
         notes=req["notes"],
         tempo_segments=req["tempo_segments"],
         sample_rate=req["sample_rate"],
+        preutterance_frames=req.get("preutterance_frames", 0),
+        window=req.get("window"),
     )
-    return {"baseline": baseline, "n_frames": len(baseline)}
-
-
-def handle_apply(req: dict) -> dict:
-    baseline = engine.project(
-        notes=req["notes"],
-        tempo_segments=req["tempo_segments"],
-        sample_rate=req["sample_rate"],
-    )
-    applied = engine.apply(baseline, req.get("interventions", []))
-    return {"baseline": baseline, "applied": applied, "n_frames": len(baseline)}
 
 
 def handle_visualize(req: dict) -> dict:
-    baseline = engine.project(
-        notes=req["notes"],
-        tempo_segments=req["tempo_segments"],
-        sample_rate=req["sample_rate"],
-    )
-    applied = engine.apply(baseline, req.get("interventions", []))
-    tag = req.get("tag", "comparison")
+    output_dir = Path(req.get("output_dir") or DEFAULT_OUTPUT_DIR).resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
     path = plot_comparison(
-        baseline, applied,
+        baseline=req["baseline"],
+        applied=req["applied"],
         notes=req["notes"],
         tempo_segments=req["tempo_segments"],
         sample_rate=req["sample_rate"],
-        output_dir=OUTPUT_DIR,
-        tag=tag,
+        output_dir=output_dir,
+        tag=req.get("tag", "comparison"),
+        spills=req.get("spills"),
+        interventions=req.get("interventions"),
     )
     return {"path": str(path)}
 
 
 DISPATCH = {
     "project": handle_project,
-    "apply": handle_apply,
     "visualize": handle_visualize,
 }
 
 
 def main():
-    raw = sys.stdin.read()
+    raw = Path(sys.argv[1]).read_text(encoding="utf-8") if len(sys.argv) > 1 else sys.stdin.read()
     try:
         req = json.loads(raw)
     except json.JSONDecodeError as e:
         json.dump({"error": f"Invalid JSON: {e}"}, sys.stdout)
         sys.exit(1)
 
-    action = req.get("action", "apply")
+    action = req.get("action", "project")
     handler = DISPATCH.get(action)
     if handler is None:
         json.dump({"error": f"Unknown action: {action}"}, sys.stdout)

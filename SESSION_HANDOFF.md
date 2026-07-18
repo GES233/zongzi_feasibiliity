@@ -1,6 +1,8 @@
 # zongzi_feasibility 会话交接文档
 
-> 本文件由 Kimi Code 生成，用于跨仓库迁移会话时作为上下文注入。当前会话原计划：先完成 zongzi_feasibility 的 toy 引擎 + 可视化验证台，再并行修复 NPSS 作为真实后端。
+> 本文件由 Kimi Code 生成，用于跨仓库迁移会话时作为上下文注入。
+> **状态更新（2026-07-18）：Track A（toy 引擎 + 可视化验证台）已全部完成并验收（10/10 场景命中）。
+> Track B（NPSS）按用户决定搁置——`zongzi-svs` 的 UTAU/DiffSinger 实例将作为真实引擎替代线。**
 
 ---
 
@@ -10,11 +12,11 @@ zongzi 核只负责三件事：**序列真相（Timeline）+ 结构 rebase（Anc
 
 `zongzi_feasibility`（`D:/CodeRepo/Qy/zongzi_feasibility`）是这三个库外角色的**可执行参考实现 + 验证台**：
 
-- **Caller**：编排者。持 note 表，执行编辑，组装 `Anchor.Context` / `Windowing.Context`，跑 rebase → window → check/render 回路。
-- **Engine**：实现 `Zongzi.Engine` behaviour。先接 toy Python 引擎；修复后接真实 NPSS 引擎。
-- **Declaration 实现**：以 `:pitch` channel 为样板，实现 `Zongzi.Intervention.Declaration`。
-- **可视化**：结果可视化是最高优先级。每轮对抗出图，汇总 HTML 报告。
-- **Scenarios + Measurer**：把 `GOLDEN_SCENARIOS.md` 骨架跑成可执行用例，输出存活/冲突指标。
+- **Caller**：`ZongziFeasibility.Caller`——编排者。持 note 表，执行编辑，组装 `Anchor.Context` / `Windowing.Context`，跑 rebase → window → check/render 回路。
+- **Engine**：`ZongziFeasibility.Engine`——`Zongzi.Engine` behaviour 的 toy 实现，接 toy Python 引擎。
+- **Declaration 实现**：`ZongziFeasibility.Declaration.Pitch`——`:pitch` channel 样板。
+- **可视化**：每轮对抗自动落 `priv/output/<scenario>/round_NN.png`，汇总 `priv/output/report.html` + `report.json`。
+- **Scenarios + Measurer**：G-INT-01/02、G-ENG-02、G-PRE-01..07 全部落地，期望 10/10 命中。
 
 ---
 
@@ -23,207 +25,84 @@ zongzi 核只负责三件事：**序列真相（Timeline）+ 结构 rebase（Anc
 | 文件 | 关键内容 |
 |------|----------|
 | `lib/zongzi/engine.ex` | `check/1` 必选，`render/1` 可选；request 是 map，**`segments: [Windowing.Segment.t()]` 必填**；`params` 与 `interventions` 分流。 |
-| `lib/zongzi/intervention/declaration.ex` | `scope/2`（静态算 `{start_tick, end_tick}` 保守上界，**不能依赖投影**）、`snapshot/2`（挂载时取原始值）、`resolve/2`（`{:ok, artifact} \| {:conflict, reason}`）、`on_rebase/3`（optional）。 |
+| `lib/zongzi/intervention/declaration.ex` | `scope/2`（静态保守上界，**不能依赖投影**）、`snapshot/2`（挂载时取原始值）、`resolve/2`（`{:ok, artifact} \| {:conflict, reason}`）、`on_rebase/3`（optional）。 |
 | `lib/zongzi/intervention.ex` | `Intervention` struct：`id, channel, anchor, payload, snapshot, scope, strategy, declaration`。 |
-| `lib/zongzi/anchor.ex` | `Anchor.rebase_all(interventions, timeline, context, opts)` 返回 `%{survived: [], conflicts: []}`。 |
-| `lib/zongzi/windowing.ex` | `Windowing.run_stages(ctx, [RestSplit3Beats])` 输出瞬态 `[Segment]`。 |
-| `lib/zongzi/windowing/context.ex` | `timeline` + `notes_by_seq` + `tempo_map` + `interventions` 等。 |
-| `lib/zongzi/windowing/segment.ex` | `start_tick, end_tick, seq_ids`，左闭右开。 |
-| `docs/zh/spec/decisions/*.md` | 设计决策依据：`control-points-authoritative`（控制点真源）、`declaration-projection-resolution`（snapshot 归一化）、`payload-boundary`（`on_rebase/3`）、`anchor-operate-orthogonality`（结构锚 ⊥ 语义 operate）、`windowing-post-rebase`（硬管道）。 |
+| `lib/zongzi/anchor.ex` | `Anchor.rebase_all(interventions, timeline, context, opts)` 返回 `%{survived: [], conflicts: []}`；`on_rebase` 的 meta 只有 `%{decision, old_anchor, new_anchor}`。 |
+| `lib/zongzi/windowing.ex` | `Windowing.run_stages(ctx, [RestSplit3Beats])` 输出瞬态 `[Segment]`；intervention `scope` 会撑窗。 |
+| `docs/zh/spec/decisions/*.md` | 设计决策依据。 |
 
 ---
 
-## 3. zongzi_feasibility 现状（启动前）
-
-目录结构：
+## 3. 当前架构（Track A 已完成）
 
 ```
-lib/feasibility/
-  engine.ex              # 未实现 Zongzi.Engine，自造 Request struct，硬编码 D:\Conda\python.exe
-  engine/request.ex      # 自造 Request struct，要删或改为工具函数
-  declaration/pitch.ex   # 契约未对齐：scope 读缓存、resolve 返回 {:skip, _}、payload 用 frame 索引
-  measurer.ex            # :todo stub
-  zongzi_feasibility.ex  # hello world 占位
+lib/zongzi_feasibility/
+  caller.ex             # Caller：new/mount_intervention/edit/window/check_round/render_round/tick_to_frame
+  engine.ex             # @behaviour Zongzi.Engine；check/render；params（gender/energy）校验
+  engine/python.ex      # System.cmd 桥；run(map) :: {:ok, map} | {:error, String.t}
+  declaration/pitch.ex  # scope/snapshot/resolve/on_rebase；telemetry [:zongzi_feasibility, :declaration, :stale]
+  scenario.ex           # Scenario behaviour（id/title/setup/edits/expect）+ base_caller/mount 助手
+  scenarios/            # g_int_01/02, g_eng_02, g_pre_01..07
+  measurer.ex           # 跑批 + console 表 + priv/output/report.{json,html}；telemetry [:zongzi_feasibility, :scenario, :round]
 priv/scripts/
-  engine.py              # toy 投影引擎，带 apply() 函数（应删，apply 移回 Elixir 侧）
-  engine_cli.py          # stdin/stdout JSON 桥，action: project/apply/visualize
-  visualize.py           # 简单对比图，待增强
-  server.py              # 已废弃，应删除
-  requirements.txt       # 列了未用的 pyworld
+  engine.py             # project（含 lyric 联动 preutterance 溢出）；无 apply
+  engine_cli.py         # argv[1]=request.json 或 stdin；action: project/visualize
+  visualize.py          # baseline vs applied + vuv + note 竖线 + intervention 色块 + spill 标注
+config/config.exs       # config :zongzi_feasibility, python:/engine_cli:
 ```
 
-模块命名空间是 `ZongziFeasibility.*`，但目录是 `lib/feasibility/`——应统一为 `lib/zongzi_feasibility/`。
+验收口径（2026-07-18 全绿）：
+
+- `mix compile --warnings-as-errors` 通过。
+- `mix test` 22 全绿（单元，不依赖 Python；integration 默认排除）。
+- `mix test --only integration` 14 全绿（4 引擎桥 + 10 场景）。
+- `mix run -e "ZongziFeasibility.Measurer.run()"` 期望命中 10/10，`priv/output/report.html` 可读。
 
 ---
 
-## 4. Track A：zongzi_feasibility 任务拆解
+## 4. Track A 实施要点与偏离记录
 
-### A1. 契约对齐清理
+相对原 A1–A7 计划的实际落地差异：
 
-- 目录：`lib/feasibility/` → `lib/zongzi_feasibility/`，所有模块名改为 `ZongziFeasibility.*`。
-- 删除 `priv/scripts/server.py`；`requirements.txt` 去掉 `pyworld`。
-- Python 路径可配置：`Application.get_env(:zongzi_feasibility, :python, "python")`；在 `config/config.exs` 中可写死为 `"D:/Conda/python.exe"`（正斜杠）。
-- telemetry 事件前缀：`[:zongzi, :intervention, :stale]` → `[:zongzi_feasibility, :declaration, :stale]`。
-- 验收：`mix compile --warnings-as-errors` 通过。
-
-### A2. Declaration.Pitch 重写
-
-这是语义核心。所有改动必须对齐 `Zongzi.Intervention.Declaration` behaviour。
-
-- **payload 形状**：改为 tick 坐标（不再是 frame 索引）：
-  ```elixir
-  %{control_points: [{tick, offset_cents}], boundary: {start_tick, end_tick}, original: term}
-  ```
-- **scope/2**：用 `boundary ± @max_preutterance_ticks` 静态算 `{start_tick, end_tick}`，不读 `int.scope` 缓存。
-- **snapshot/2**：从投影取 boundary 覆盖帧，**归一化**为有序列表：
-  ```elixir
-  [[frame, pitch_4位小数, vuv], ...]
-  ```
-  目的：对抗 JSON round-trip 的 integer→string key 漂移和 float 精度漂移。
-- **resolve/2**：
-  - 一致 → `{:ok, applied_projection}`
-  - 不一致 → `{:conflict, :snapshot_stale}`，并触发 telemetry
-  - 在 applied 中按 `control_points` 叠 cents offset（`2^(cents/1200)`）。
-- **on_rebase/3**：
-  - rebase 平移：按 anchor 变化平移 control_points tick。
-  - focus split：按 `split_tick` 切 boundary + control_points → `{:split, [child1, child2]}`。
-- **测试**：`test/smoke_test.exs` 同步更新（resolve 返回值、新 payload 形状）。
-
-### A3. Engine + toy 引擎扩展
-
-- `ZongziFeasibility.Engine`：`@behaviour Zongzi.Engine`。
-  - `check/1`：segments → Python `project` → baseline 投影 → 逐条 intervention 调 `Declaration.Pitch.resolve` → `%{projection, resolved, conflicts}`。
-  - `render/1`（optional）：合并 resolved 得 applied 投影 → 调 Python `visualize` → PNG 路径。
-  - `params` 校验：gender/energy 等全局参数非法时返回 `{:error, {:invalid_params, ...}}`。
-- `ZongziFeasibility.Engine.Python`：System.cmd 桥下沉至此；只暴露 `run(map_body) :: {:ok, map} \| {:error, String.t}`。
-- `engine.py`：
-  - 删除 `apply()`（delta apply 移回 Elixir 侧 `resolve`）。
-  - `project` 加 `preutterance_frames` 参数：每 note 头部向前溢出 N 帧，溢出帧标定 pitch/vuv，可覆盖进前 note 尾部——这是 G-PRE 场景能真实发生的前提。
-- `engine_cli.py`：保留 `project`/`visualize`；删除 `apply` action。
-- `visualize.py`：增强为 baseline vs applied 曲线 + note 边界竖线 + intervention 作用域色块 + snapshot 失配区间高亮。
-- 删除 `ZongziFeasibility.Engine.Request` struct，request 用 zongzi 规定的 map。
-- 验收：
-  - `mix test` 全绿。
-  - Engine 是 `Zongzi.Engine` behaviour。
-  - Python 桥集成测试打 `@tag :integration`，`test_helper.exs` 默认 `exclude: [:integration]`；手动 `mix test --only integration` 可验证。
-
-### A4. Caller 编排
-
-新建 `ZongziFeasibility.Caller`：
-
-- `new/1`：从 score 建 `%Caller{timeline, notes_by_seq, interventions, tempo_map, ...}`。
-- `mount_intervention/2`：构造 `Intervention` 并调 `declaration.snapshot` 挂载。
-- `edit/2`：支持 ops：`edit_lyric`, `split`, `delete`, `insert`, `move`, `merge`。
-  - 内部：Timeline 写 → 组装 `Anchor.Context` → `Anchor.rebase_all` → `Windowing.run_stages` → 返回决策报告。
-- `check_round/1` / `render_round/1`：组 Engine request，调用 Engine，触发可视化。
-- 这是 zongzi README sequence diagram 的可执行版。
-
-### A5. 可视化层（第一优先级）
-
-- `visualize.py` 输出：
-  - baseline vs applied f0 曲线
-  - vuv  voiced/unvoiced 带
-  - note 边界竖线（请求带 notes）
-  - intervention 作用域色块（请求带 interventions boundary）
-  - snapshot 失配区间高亮
-  - preutterance 溢出区标注
-- 每轮对抗自动落 `priv/output/<scenario>/<round>.png`。
-- `report.html` 单文件汇总：每场景一张卡片，内嵌 base64 图 + 结构决策 + 语义决议 + 期望命中 + 指标表。
-- 验收：手动跑一次端到端，打开 report.html 可读。
-
-### A6. Scenarios + Measurer
-
-- `ZongziFeasibility.Scenario` behaviour：`setup/0`, `edits/1`, `expect/2`。
-- 落地场景（对齐 `GOLDEN_SCENARIOS.md`）：
-  - G-INT-01：挂载→编辑→rebase→resolve 完整对抗轮
-  - G-INT-02：snapshot 失配 → conflict（不静默 apply）
-  - G-ENG-02：check/render 只吃 segments
-  - G-PRE-01..07：紧靠/小 gap/大 gap/重叠/三重链 × 有无 intervention
-- `Measurer`：
-  - 结构决策分布（preserve/rebase/relocate/conflict）
-  - 语义决议分布（apply/conflict）
-  - 期望命中率
-  - 输出：console 表 + `priv/output/report.json` + `report.html`
-  - telemetry：`[:zongzi_feasibility, :scenario, :round]`
-
-### A7. 测试与验收
-
-- 修 `smoke_test.exs`（resolve 返回值）。
-- Engine contract 测试：检查 `check` 吃 segments map，非法 params 报错。
-- 每 G-* 场景一个 describe。
-- 最终验收：
-  - `mix test` 全绿
-  - `mix run -e "ZongziFeasibility.Measurer.run()"` 出报告且期望全命中
-  - `report.html` 可打开阅读
+1. **Request struct 已删**：request 一律用 zongzi 契约 map（`segments` 必填）。
+2. **System.cmd 没有 `:input` 选项**（原 engine.ex 从来没真正跑通过）：request 写临时 JSON 文件，路径作 argv[1] 传给 `engine_cli.py`（stdin 模式保留）。
+3. **toy 引擎 preutterance 与歌词联动**：`N(note) = preutterance_frames + len(lyric)`。这是 G-PRE 场景"改歌词 → preutterance 前移 → 投影变化"能真实发生的前提。投影输出为 `[[frame, pitch, vuv], ...]` 升序列表（从源杜绝 JSON string-key 漂移）；spill 帧标 `vuv=0`。
+4. **坐标分工**：tick 空间权威（control_points/boundary），frame 空间缓存由 Caller 维护（`payload.frames`）；Declaration 不做 tick↔frame 换算。Caller 的 `tick_to_sec` 与 `engine.py` 严格同构。注意 Elixir `round/1`（half-up）与 Python `round()`（half-even）的理论差异，86.13 采样率下实际不触发。
+5. **on_rebase 分工**：`Anchor.rebase_all` 给的 meta 无 tick 信息（Timeline 不持 note 字段），所以 move 的 payload/snapshot 平移由 **Caller** 在编辑时做；focus split 由 Caller 注入 `:split_hint`，`Declaration.Pitch.on_rebase/3` 消费并返回 `{:split, [child_a, child_b]}`。
+6. **Caller ops**：`edit_lyric / edit_key / split / delete / insert / move / merge`。`edit_key` 是计划外新增（G-INT-02 需要确定性改变 boundary 内投影）。`move` 是 tick 平移（drag），不是链序重排。
+7. **场景设计要点**：G-INT-01 用 `preutterance_frames: 0` + nil lyric（否则 split 在切点引入新 preutterance 导致 child_a 合理 conflict——该行为本身正确，happy path 需隔离）；G-PRE-05 的 gap 要计入 scope ±240 撑窗（4.5 拍才切两窗）；G-PRE-04 两轮逼近演示"判假不 conflict、判真才 conflict"。
+8. **根目录 `config.exs` 原不被 Mix 加载**，已并入 `config/config.exs`（含原 pythonx 配置）。
+9. `Measurer` 的 round 记录含 `decisions`（preserve/rebase/relocate/split/conflict，由 `Caller.edit` 标注）。
 
 ---
 
-## 5. Track B：NPSS 并行线（真实后端）
+## 5. Track B：NPSS 线（已搁置）
 
-### 已发现的致命问题
+用户决定：NPSS 搁置，`D:/CodeRepo/SingingSynthesis/zongzi-svs` 的 UTAU/DiffSinger 实例作为真实引擎替代（PoC 已跑通，需打磨）。`config/config.exs` 里保留的 pythonx/onnxruntime 配置即为该方向预留。
 
-- `D:/CodeRepo/SingingSynthesis/NPSS` 的 4 个 ONNX 模型已导出，但 **全部塌陷为恒等拷贝**：
-  - vuv train_loss = 0.000000
-  - harmonic best NLL = -5.14
-  - f0 TF 相关系数 0.9999
-- 根因：`scripts/dataset.py` 的 `y = tgt[start+R : start+R+T]`，而因果卷积 left-pad 让 `output[j]` 能看见 `x[j]` 本身，拷贝即最优解。
-- `data/output/npss_4_full_pred.wav` 等文件是用 `inference_full.py` 做 **teacher-forcing 重建** 产生的，不是自回归生成。
+若未来恢复 NPSS：
 
-### 已做的修复
-
-- 本地 `scripts/dataset.py`：
-  - `y = tgt[start+R+1 : start+R+T+1]`（output[j] 预测 x[j+1]）
-  - `cond` 同步右移一帧（对齐被预测帧）
-  - `_build_index` 收紧一帧，避免末样本静默截短
-  - 补 vuv 1-D target 的 ndim 处理
-  - 已本地验证：4 个 Dataset 形状、边界、内部对齐、collate 全通过。
-- 云端 `/root/autodl-tmp/NPSS/scripts/dataset.py`：已上传同步修复后的版本，但未跑冒烟验证（实例已关闭）。
-
-### 恢复后的下一步
-
-1. 开带卡 AutoDL 实例（云端路径 `/root/autodl-tmp/NPSS`）。
-2. 用 `/root/miniconda3/bin/python` 跑云端 dataset 冒烟检查。
-3. 先训 harmonic 50–100 epoch（约 0.5–1 小时）。
-4. 用 `scripts/inference_spike.py` 探针验收：
-   - teacher-forcing shift 表峰值应在 **+1**
-   - 末帧扰动增益 ≈ 0
-   - 短程 AR 不发散
-5. 验收通过后，全量 4 模型重训 → 导出 ONNX → 下载到本地。
-6. 在 zongzi_feasibility 中新增 `ZongziFeasibility.Engine.NPSS` 实现，替换 toy 后端（A3 的接口不变）。
+1. 开带卡 AutoDL 实例（云端路径 `/root/autodl-tmp/NPSS`），用 `/root/miniconda3/bin/python` 冒烟云端 `scripts/dataset.py`（y 右移 +1 修复已同步）。
+2. 先训 harmonic 50–100 epoch，用 `scripts/inference_spike.py` 探针验收（shift 表峰值 +1、末帧扰动增益 ≈ 0、短程 AR 不发散）。
+3. 全量 4 模型重训 → 导出 ONNX → 下载本地。
+4. 新增 `ZongziFeasibility.Engine.NPSS`（A3 的 request 契约不变，直接替换后端）。
 
 ---
 
-## 6. Agent 状态
+## 6. 下一步（Track A 之后）
 
-- **agent-0**：NPSS 修复。曾被启动并完成了本地 `dataset.py` 的 y 右移基础修复；后续 cond 对齐、ndim 处理、边界收紧、云端同步由本会话手动完成。目前任务已 kill，恢复 NPSS 线时可直接用当前文件状态继续，无需 resume。
-- **agent-1**：zongzi_feasibility 契约层（A1–A3）。被启动后未返回进度即被 kill。恢复 zongzi_feasibility 主线时，建议重新从当前仓库状态出发，不必 resume agent-1。
-
----
-
-## 7. 恢复检查清单
-
-迁移到新仓库后，先确认：
-
-- [ ] 当前工作目录是 `D:/CodeRepo/Qy/zongzi_feasibility`。
-- [ ] 能读取 `../zongzi` 作为 path dependency（`mix.exs` 已配置）。
-- [ ] 若继续 NPSS 线，先开 AutoDL 带卡实例并验证云端 `dataset.py` 状态。
-- [ ] 从 A1 开始推进 zongzi_feasibility 主线，或先跳到 A4–A5 快速可视化（前提是 A1–A3 已有人完成）。
+- **接 zongzi-svs 真实引擎**：参考 `ZongziFeasibility.Engine` 实现新的 Engine 适配器（UTAU / DiffSinger），`check/render` request 契约不变；G-PRE 场景可从 toy 语义平移到真实 preutterance。
+- **snapshot 归一化的浮点口径**：toy 引擎确定性良好；真实引擎需确认同版本同输入逐位可复现，否则按 declaration-projection-resolution 的口径在序列化侧归一化。
+- `pythonx` 依赖目前闲置（Track A 用 System.cmd 桥），接真实引擎时启用。
 
 ---
 
-## 8. 相关路径速查
+## 7. 相关路径速查
 
 | 项目 | 路径 |
 |------|------|
 | zongzi_feasibility | `D:/CodeRepo/Qy/zongzi_feasibility` |
 | zongzi | `D:/CodeRepo/Qy/zongzi` |
-| NPSS 本地 | `D:/CodeRepo/SingingSynthesis/NPSS` |
-| NPSS 云端(已关机) | `root@connect.weste.seetacloud.com:48036:/root/autodl-tmp/NPSS` |
-| 已改文件 | `D:/CodeRepo/SingingSynthesis/NPSS/scripts/dataset.py` |
-| 待改文件 | `lib/zongzi_feasibility/engine.ex`、`lib/zongzi_feasibility/declaration/pitch.ex`、`lib/zongzi_feasibility/caller.ex` 等 |
-
----
-
-## 9. 用户补充
-
-现在 `D:/CodeRepo/SingingSynthesis/zongzi-svs` 已经有了 UTAU 以及 DiffSinger 实例，PoC 跑通，但需要进一步打磨。
+| zongzi-svs（UTAU/DiffSinger PoC） | `D:/CodeRepo/SingingSynthesis/zongzi-svs` |
+| NPSS 本地（搁置） | `D:/CodeRepo/SingingSynthesis/NPSS` |
+| NPSS 云端（搁置，已关机） | `root@connect.weste.seetacloud.com:48036:/root/autodl-tmp/NPSS` |

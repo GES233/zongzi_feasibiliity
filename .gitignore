@@ -22,3 +22,12 @@ erl_crash.dump
 # Ignore package tarball (built via "mix hex.build").
 zongzi_feasibility-*.tar
 
+
+# Python
+__pycache__/
+*.pyc
+
+# Output
+*.png
+*.json
+*.html

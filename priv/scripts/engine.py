@@ -48,45 +48,83 @@ def midi_to_hz(midi):
 # ---- Engine ----
 
 class Engine:
-    """Frame-level projection engine."""
+    """Frame-level projection engine (baseline + preutterance spill)."""
 
-    def project(self, notes, tempo_segments, sample_rate):
-        """Generate baseline projection: {frame: {pitch, vuv}}."""
-        n_frames = self._max_frame(notes, tempo_segments, sample_rate)
-        projection = {f: {"pitch": 0.0, "vuv": 0} for f in range(n_frames)}
+    def project(self, notes, tempo_segments, sample_rate,
+                preutterance_frames=0, window=None):
+        """Project notes onto a frame grid.
 
-        for note in notes:
+        Args:
+            notes: [{"id", "seq_id", "start_tick", "duration_tick",
+                     "midi", "lyric"}]
+            tempo_segments: [[tick, bpm], ...]
+            sample_rate: frames per second.
+            preutterance_frames: base spill length in frames; each note
+                head spills `preutterance_frames + len(lyric)` frames
+                backward over the preceding frames (lyric-dependent, so a
+                lyric edit moves the spill frontier — G-PRE semantics).
+            window: optional [start_tick, end_tick) in ticks; defaults to
+                [0, last note end frame + 10 frames).
+
+        Returns:
+            {"projection": [[frame, pitch_hz, vuv], ...] ascending by frame,
+             "spills": [[f0, f1], ...] actual spill frame intervals, ascending}
+        """
+        if window is None:
+            if not notes:
+                return {"projection": [], "spills": []}
+            max_end_tick = max(
+                n["start_tick"] + n["duration_tick"] for n in notes
+            )
+            end_t = ticks_to_seconds([max_end_tick], tempo_segments)[0]
+            f_start, f_end = 0, time_to_frame(end_t, sample_rate) + 10
+        else:
+            t0, t1 = ticks_to_seconds([window[0], window[1]], tempo_segments)
+            f_start = time_to_frame(t0, sample_rate)
+            f_end = time_to_frame(t1, sample_rate)
+
+        n_frames = max(0, f_end - f_start)
+        pitch = np.zeros(n_frames, dtype=float)
+        vuv = np.zeros(n_frames, dtype=int)
+
+        def note_frames(note):
             t0 = ticks_to_seconds([note["start_tick"]], tempo_segments)[0]
             t1 = ticks_to_seconds(
                 [note["start_tick"] + note["duration_tick"]], tempo_segments
             )[0]
-            f0 = time_to_frame(t0, sample_rate)
-            f1 = time_to_frame(t1, sample_rate)
-            hz = midi_to_hz(note["midi"])
+            return (time_to_frame(t0, sample_rate),
+                    time_to_frame(t1, sample_rate))
 
-            for f in range(f0, min(f1, n_frames)):
-                projection[f] = {"pitch": hz, "vuv": 1}
+        # Baseline: note body -> pitch = note hz, vuv = 1 (clipped to window).
+        for note in notes:
+            f0, f1 = note_frames(note)
+            lo, hi = max(f0, f_start), min(f1, f_end)
+            if lo < hi:
+                pitch[lo - f_start:hi - f_start] = midi_to_hz(note["midi"])
+                vuv[lo - f_start:hi - f_start] = 1
 
-        return projection
+        # Preutterance spill: [note_f0 - N, note_f0) is overwritten with the
+        # note's pitch and vuv = 0 (consonant onset has no fundamental).
+        # Later notes may overwrite earlier notes' tails.
+        # Toy semantics: N depends on the lyric — different phonemes have
+        # different preutterance, so a lyric edit moves the spill frontier.
+        # N(note) = preutterance_frames + len(lyric).
+        spills = []
+        for note in notes:
+            n = preutterance_frames + len(note.get("lyric") or "")
+            if n <= 0:
+                continue
+            f0, _ = note_frames(note)
+            lo = max(f0 - n, f_start)
+            hi = min(f0, f_end)
+            if lo < hi:
+                pitch[lo - f_start:hi - f_start] = midi_to_hz(note["midi"])
+                vuv[lo - f_start:hi - f_start] = 0
+                spills.append([lo, hi])
+        spills.sort()
 
-    def apply(self, projection, interventions):
-        """Apply intervention deltas. Returns NEW dict."""
-        result = {f: dict(d) for f, d in projection.items()}
-
-        for intv in interventions:
-            delta = intv.get("payload", {}).get("delta", {})
-            for f_str, shift in delta.items():
-                f = int(f_str)
-                if f in result:
-                    result[f]["pitch"] = max(
-                        0.0, result[f]["pitch"] + shift.get("pitch", 0.0)
-                    )
-
-        return result
-
-    def _max_frame(self, notes, tempo_segments, sample_rate):
-        if not notes:
-            return 0
-        max_end = max(n["start_tick"] + n["duration_tick"] for n in notes)
-        end_t = ticks_to_seconds([max_end], tempo_segments)[0]
-        return time_to_frame(end_t, sample_rate) + 10
+        projection = [
+            [f_start + i, float(pitch[i]), int(vuv[i])]
+            for i in range(n_frames)
+        ]
+        return {"projection": projection, "spills": spills}
