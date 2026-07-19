@@ -22,6 +22,19 @@ Request format:
      "tag": "round_001"}
     -> {"path": "<absolute path to PNG>"}
 
+    {"action": "utau_check",
+     "notes": [...], "tempo_segments": [...], "sample_rate": 86.13,
+     "preutterance_frames": 0, "window": [start_tick, end_tick],
+     "utau_config": {"voicebank_root": "...", "resampler": "...", "wavtool": "..."}}
+    -> {"projection": [[frame, pitch, vuv], ...], "spills": [[f0, f1], ...]}
+
+    {"action": "utau_render",
+     "notes": [...], "tempo_segments": [...],
+     "utau_config": {"voicebank_root": "...", "resampler": "...", "wavtool": "..."},
+     "out_path": "...",  # optional, defaults to priv/output/<tag>.wav
+     "tag": "utau"}
+    -> {"path": "<absolute path to WAV>", "duration": ..., "sample_rate": ...}
+
 Errors: {"error": "..."} on stdout, exit code 1.
 """
 from __future__ import annotations
@@ -32,6 +45,7 @@ from pathlib import Path
 
 from engine import Engine
 from visualize import plot_comparison
+from utau_engine import handle_utau_check, handle_utau_render
 
 # priv/scripts/engine_cli.py -> priv/output
 DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent.parent / "output"
@@ -69,6 +83,8 @@ def handle_visualize(req: dict) -> dict:
 DISPATCH = {
     "project": handle_project,
     "visualize": handle_visualize,
+    "utau_check": handle_utau_check,
+    "utau_render": handle_utau_render,
 }
 
 

@@ -9,5 +9,12 @@ config :pythonx, :uv_init,
   dependencies = [
       "numpy",
       "matplotlib",
+      "soundfile",
+      "pyyaml",
   ]
   """
+
+config :zongzi_feasibility, :utau,
+  voicebank_root: "D:/CodeRepo/SingingSynthesis/UTAU/重音テト音声ライブラリー",
+  resampler: "D:/CodeRepo/SingingSynthesis/UTAU/doppeltler64.exe",
+  wavtool: "D:/CodeRepo/SingingSynthesis/UTAU/wavtool64.exe"

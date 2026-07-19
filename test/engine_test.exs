@@ -59,7 +59,7 @@ defmodule ZongziFeasibility.EngineTest do
 
     test "params 非 map", %{req: req} do
       assert {:error, {:invalid_params, :not_a_map}} =
-               Engine.check(Map.put(req, :params, [gender: 0]))
+               Engine.check(Map.put(req, :params, gender: 0))
     end
   end
 end

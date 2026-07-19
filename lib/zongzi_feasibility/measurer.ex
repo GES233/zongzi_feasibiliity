@@ -283,8 +283,11 @@ defmodule ZongziFeasibility.Measurer do
   defp round_html(round) do
     img =
       case File.read(round.png) do
-        {:ok, bin} -> ~s(<img src="data:image/png;base64,#{Base.encode64(bin)}" alt="round #{round.round}">)
-        {:error, _} -> "<p>(png missing: #{round.png})</p>"
+        {:ok, bin} ->
+          ~s(<img src="data:image/png;base64,#{Base.encode64(bin)}" alt="round #{round.round}">)
+
+        {:error, _} ->
+          "<p>(png missing: #{round.png})</p>"
       end
 
     """

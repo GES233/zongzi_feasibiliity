@@ -33,12 +33,12 @@ defmodule ZongziFeasibility.Caller do
   @default_sample_rate 86.13
 
   @type t :: %__MODULE__{
-    timeline: nil | Timeline.t(),
-    notes_by_seq: %{},
-    interventions: [Intervention.t()],
-    tempo_segments: [],
-    opts: map()
-  }
+          timeline: nil | Timeline.t(),
+          notes_by_seq: %{},
+          interventions: [Intervention.t()],
+          tempo_segments: [],
+          opts: map()
+        }
 
   defstruct timeline: nil,
             notes_by_seq: %{},
@@ -187,6 +187,7 @@ defmodule ZongziFeasibility.Caller do
 
   defp apply_op(caller, {:split, seq, split_tick}) do
     note = Map.fetch!(caller.notes_by_seq, seq)
+
     {:ok, tl, before_n, after_n} =
       Timeline.split_note(caller.timeline, note, split_tick, ID.generate_id("Note_"))
 
@@ -216,6 +217,7 @@ defmodule ZongziFeasibility.Caller do
 
   defp apply_op(caller, {:delete, seq}) do
     {:ok, tl} = Timeline.delete_note(caller.timeline, seq)
+
     {:ok, %{caller | timeline: tl, notes_by_seq: Map.delete(caller.notes_by_seq, seq)},
      {:delete, seq}}
   end
@@ -245,8 +247,7 @@ defmodule ZongziFeasibility.Caller do
         if focus(int) == seq, do: shift_int(int, tick_delta, frame_delta), else: int
       end)
 
-    {:ok,
-     %{caller | notes_by_seq: Map.put(caller.notes_by_seq, seq, moved), interventions: ints},
+    {:ok, %{caller | notes_by_seq: Map.put(caller.notes_by_seq, seq, moved), interventions: ints},
      {:move, seq, new_start}}
   end
 
@@ -328,7 +329,13 @@ defmodule ZongziFeasibility.Caller do
     if tick >= next_tick do
       [[_, next_bpm] | rest2] = rest
 
-      advance(rest2, tick, next_tick, next_bpm, time + (next_tick - seg_tick) / @tpqn * 60.0 / bpm)
+      advance(
+        rest2,
+        tick,
+        next_tick,
+        next_bpm,
+        time + (next_tick - seg_tick) / @tpqn * 60.0 / bpm
+      )
     else
       time + (tick - seg_tick) / @tpqn * 60.0 / bpm
     end
@@ -398,7 +405,8 @@ defmodule ZongziFeasibility.Caller do
     }
   end
 
-  defp put_note(caller, note), do: %{caller | notes_by_seq: Map.put(caller.notes_by_seq, note.seq_id, note)}
+  defp put_note(caller, note),
+    do: %{caller | notes_by_seq: Map.put(caller.notes_by_seq, note.seq_id, note)}
 
   defp build_note(%Note{} = n), do: {:ok, n}
 

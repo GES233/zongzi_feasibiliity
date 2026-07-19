@@ -49,7 +49,9 @@ defmodule ZongziFeasibility.EngineIntegrationTest do
 
   test "check → mount → 无变化再 check：resolve 成功" do
     caller = two_note_caller(%{preutterance_frames: 5})
-    {caller, _int} = Caller.mount_intervention(caller, %{seq: 2, control_points: [{480, 100.0}], id: "iv_b"})
+
+    {caller, _int} =
+      Caller.mount_intervention(caller, %{seq: 2, control_points: [{480, 100.0}], id: "iv_b"})
 
     {:ok, artifact} = Caller.check_round(caller)
     assert artifact.conflicts == []
@@ -63,7 +65,9 @@ defmodule ZongziFeasibility.EngineIntegrationTest do
 
   test "edit_key 改变 boundary 内投影 → snapshot_stale conflict" do
     caller = two_note_caller(%{preutterance_frames: 5})
-    {caller, _int} = Caller.mount_intervention(caller, %{seq: 2, control_points: [{480, 100.0}], id: "iv_b"})
+
+    {caller, _int} =
+      Caller.mount_intervention(caller, %{seq: 2, control_points: [{480, 100.0}], id: "iv_b"})
 
     {caller, _report} = Caller.edit(caller, {:edit_key, 2, 65})
     {:ok, artifact} = Caller.check_round(caller)

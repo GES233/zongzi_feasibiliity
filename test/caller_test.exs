@@ -123,7 +123,12 @@ defmodule ZongziFeasibility.CallerTest do
   test "insert: append 新 note，链尾 anchor 的 next 被 rebase 填充" do
     caller = abc_caller()
     {caller, _int} = mount_on(caller, 3)
-    {caller, report} = Caller.edit(caller, {:insert, %{start_tick: 1440, duration_tick: 480, midi: 65, lyric: "ta"}})
+
+    {caller, report} =
+      Caller.edit(
+        caller,
+        {:insert, %{start_tick: 1440, duration_tick: 480, midi: 65, lyric: "ta"}}
+      )
 
     assert report.conflicts == []
     # 原 anchor {2, 3, nil} → 新 note seq 4 补位
