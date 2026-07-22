@@ -33,7 +33,7 @@ defmodule ZongziFeasibility.CallerTest do
     assert int.declaration == ZongziFeasibility.Declaration.Pitch
     # boundary 默认 focus note 区间；scope = boundary ± 240
     assert int.payload.boundary == {480, 960}
-    assert int.scope == {240, 1200}
+    assert ZongziFeasibility.Declaration.Pitch.scope(int, %{timeline: caller.timeline, tempo_map: nil, tpqn: 480}) == {240, 1200}
     # 120bpm @86.13Hz：480 tick = 0.5s ≈ 43 帧
     assert int.payload.frames.boundary == {43, 86}
     assert int.payload.frames.control_points == [{43, 100.0}, {86, 0.0}]
@@ -99,7 +99,7 @@ defmodule ZongziFeasibility.CallerTest do
     assert int.payload.frames.boundary == {86, 129}
     assert int.payload.frames.control_points == [{86, 100.0}, {129, 0.0}]
     # scope 重算
-    assert int.scope == {720, 1680}
+    assert ZongziFeasibility.Declaration.Pitch.scope(int, %{timeline: caller.timeline, tempo_map: nil, tpqn: 480}) == {720, 1680}
   end
 
   test "merge: focus 被 merge → merged_away conflict" do

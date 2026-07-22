@@ -6,7 +6,7 @@ defmodule ZongziFeasibility.Caller do
   编辑回路（zongzi README sequence diagram 的可执行版）：
 
       Timeline 写 → payload/snapshot 坐标维护 → Anchor.rebase_all
-      → scope 重算 → Windowing.run_stages → 决策报告
+      → Windowing.run_stages → 决策报告
 
   `check_round/2` / `render_round/2` 组 Engine request 调 `ZongziFeasibility.Engine`。
 
@@ -82,8 +82,8 @@ defmodule ZongziFeasibility.Caller do
   # ------------------------------------------------------------------
 
   @doc """
-  构造 pitch intervention 并挂载：取 anchor 三元组、payload.frames 缓存、
-  scope，并对当前投影取 snapshot。
+  构造 pitch intervention 并挂载：取 anchor 三元组、payload.frames 缓存，
+  并对当前投影取 snapshot。
 
   attrs: `:seq`（focus）、`:control_points`（`[{tick, cents}]`）、
   `:boundary`（默认 focus note 的 `[start, end)`）、`:id`。
@@ -92,6 +92,7 @@ defmodule ZongziFeasibility.Caller do
   """
   def mount_intervention(caller, attrs, projection \\ nil) do
     seq = Map.fetch!(attrs, :seq)
+    anchor = triplet(caller.timeline, seq)
     note = Map.fetch!(caller.notes_by_seq, seq)
     boundary = Map.get(attrs, :boundary, {note.start_tick, note.start_tick + note.duration_tick})
     cps = Map.get(attrs, :control_points, [])
@@ -102,27 +103,21 @@ defmodule ZongziFeasibility.Caller do
       frames: frames_cache(caller, cps, boundary)
     }
 
-    int = %Intervention{
-      id: Map.get(attrs, :id, ID.generate_id("iv_")),
-      channel: :pitch,
-      anchor: triplet(caller.timeline, seq),
-      payload: payload,
-      snapshot: nil,
-      scope: nil,
-      strategy: nil,
-      declaration: Pitch
-    }
-
-    int = %{int | scope: Pitch.scope(int, caller.timeline)}
+    {:ok, int} =
+      Intervention.create(
+        id: Map.get(attrs, :id, ID.generate_id("iv_")),
+        channel: :pitch,
+        anchor: anchor,
+        payload: payload,
+        declaration: Pitch
+      )
 
     projection = projection || project_current(caller)
-    {f0, f1} = payload.frames.boundary
+    {:ok, int} = Intervention.mount(int, payload, anchor, caller.timeline, projection)
 
-    int = %{
-      int
-      | snapshot: Pitch.snapshot(projection, int),
-        payload: Map.put(payload, :original, Pitch.slice(projection, f0, f1))
-    }
+    # Caller-specific: 挂原始投影切片备查（不在 Intervention 契约内）
+    {f0, f1} = payload.frames.boundary
+    int = %{int | payload: Map.put(int.payload, :original, Pitch.slice(projection, f0, f1))}
 
     {%{caller | interventions: caller.interventions ++ [int]}, int}
   end
@@ -151,11 +146,7 @@ defmodule ZongziFeasibility.Caller do
     %{survived: survived, conflicts: conflicts, decisions: decisions} =
       Anchor.rebase_all(caller.interventions, caller.timeline, ctx)
 
-    survived =
-      survived
-      |> Enum.map(&strip_hint/1)
-      |> Enum.map(&refresh_scope(&1, caller.timeline))
-
+    survived = Enum.map(survived, &strip_hint/1)
     conflicts = Enum.map(conflicts, fn {int, reason} -> {strip_hint(int), reason} end)
 
     caller = %{caller | interventions: survived}
@@ -274,10 +265,25 @@ defmodule ZongziFeasibility.Caller do
         timeline: caller.timeline,
         notes_by_seq: caller.notes_by_seq,
         interventions: caller.interventions,
+        tempo_map: compile_tempo_map(caller.tempo_segments),
         opts: %{beat_ticks: caller.opts[:beat_ticks] || @tpqn}
       })
 
     Windowing.run_stages(ctx)
+  end
+
+  defp compile_tempo_map([]), do: nil
+
+  defp compile_tempo_map(tempo_segments) do
+    events =
+      Enum.map(tempo_segments, fn [tick, bpm] ->
+        {tick, %Zongzi.Score.Tempo.Event{module: Zongzi.Score.Tempo.Step, context: %{bpm: bpm * 1.0}}}
+      end)
+
+    case Zongzi.Score.TempoMap.compile(events, tpqn: @tpqn) do
+      {:ok, tm} -> tm
+      {:error, _} -> nil
+    end
   end
 
   @doc "组 Engine request（zongzi 契约 map）。"
@@ -373,10 +379,6 @@ defmodule ZongziFeasibility.Caller do
 
   defp strip_hint(int), do: %{int | payload: Map.delete(int.payload, :split_hint)}
 
-  defp refresh_scope(int, tl) do
-    decl = int.declaration || Pitch
-    %{int | scope: decl.scope(int, tl)}
-  end
 
   defp shift_int(int, tick_delta, frame_delta) do
     p = int.payload

@@ -61,11 +61,11 @@ defmodule ZongziFeasibility.SmokeTest do
   end
 
   @tag :smoke
-  test "Declaration.Pitch scope: boundary ± max_preutterance，静态可算" do
+  test "Declaration.Pitch scope: boundary ± max_preutterance" do
     int = pitch_int([])
-    assert Pitch.scope(int, :no_timeline_needed) == {0 - 0, 480 + 240}
+    assert Pitch.scope(int, %{timeline: nil, tempo_map: nil, tpqn: 480}) == {0 - 0, 480 + 240}
 
     int2 = put_in(int.payload.boundary, {960, 1440})
-    assert Pitch.scope(int2, nil) == {960 - 240, 1440 + 240}
+    assert Pitch.scope(int2, %{timeline: nil, tempo_map: nil, tpqn: 480}) == {960 - 240, 1440 + 240}
   end
 end
