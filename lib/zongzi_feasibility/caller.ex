@@ -104,7 +104,7 @@ defmodule ZongziFeasibility.Caller do
     }
 
     {:ok, int} =
-      Intervention.create(
+      Intervention.new(
         id: Map.get(attrs, :id, ID.generate_id("iv_")),
         channel: :pitch,
         anchor: anchor,
