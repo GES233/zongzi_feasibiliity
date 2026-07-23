@@ -4,7 +4,7 @@ defmodule ZongziFeasibility.Engine.UTAU do
 
   实现 `Zongzi.Engine` behaviour：
   - `check/1`：校验声库配置、oto.ini 歌词覆盖，并返回帧级投影/溢出。
-  - `render/1`：调用外部 resampler + wavtool 渲染最终 WAV。
+  - `render/1`：消费 `checked_request`，调用外部 resampler + wavtool 渲染最终 WAV。
 
   依赖配置项：
 
@@ -52,15 +52,12 @@ defmodule ZongziFeasibility.Engine.UTAU do
   # ------------------------------------------------------------------
 
   @impl true
-  def render(%{segments: _} = req) do
-    with {:ok, artifact} <- check(req),
-         {:ok, render_result} <- render_all(req) do
+  def render(%{request: req, artifact: artifact} = _checked) do
+    with {:ok, render_result} <- render_all(req) do
       applied = apply_resolved(artifact.projection, artifact.resolved)
       {:ok, Map.merge(artifact, %{applied: applied, render: render_result})}
     end
   end
-
-  def render(_req), do: {:error, :missing_segments}
 
   # ------------------------------------------------------------------
   # UTAU 配置

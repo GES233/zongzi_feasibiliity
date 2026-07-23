@@ -305,16 +305,28 @@ defmodule ZongziFeasibility.Caller do
     end
   end
 
-  @doc "切窗 → Engine.render（触发可视化 PNG）。"
+  @doc "切窗 → Engine.check → Engine.render（触发可视化 PNG）。"
   def render_round(caller, tag, extra \\ %{}) do
     with {:ok, segments} <- window(caller) do
+      req = request(caller, segments, extra)
       opts =
         caller.opts
         |> Map.merge(Map.get(extra, :opts, %{}))
         |> Map.put(:tag, tag)
 
-      Engine.render(%{request(caller, segments, extra) | opts: opts})
+      req = %{req | opts: opts}
+
+      with {:ok, artifact} <- Engine.check(req) do
+        checked = %{request: req, artifact: artifact, fingerprint: fingerprint(req)}
+        Engine.render(checked)
+      end
     end
+  end
+
+  # 简单的内容指纹（后续可换为加密哈希）。
+  defp fingerprint(req) do
+    {Map.get(req, :segments), Map.get(req, :interventions), Map.get(req, :params)}
+    |> :erlang.phash2()
   end
 
   # ------------------------------------------------------------------

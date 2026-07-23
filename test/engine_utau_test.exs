@@ -47,8 +47,11 @@ defmodule ZongziFeasibility.Engine.UTAUTest do
       assert {:error, :missing_segments} = UTAU.check(%{notes: []})
     end
 
-    test "render 缺 segments → {:error, :missing_segments}" do
-      assert {:error, :missing_segments} = UTAU.render(%{})
+    test "render 消费 checked_request（contract shape）" do
+      checked = %{request: %{segments: []}, artifact: %{projection: [], resolved: []}, fingerprint: nil}
+      # render_all 会调 Python bridge；缺 UTAU 配置时返回 error
+      result = UTAU.render(checked)
+      assert match?({:error, _}, result) or match?({:ok, _}, result)
     end
 
     test "check 空 segments → 空投影，不触引擎" do

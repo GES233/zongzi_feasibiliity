@@ -70,7 +70,9 @@ defmodule ZongziFeasibility.Engine.UTAUIntegrationTest do
       tag: "single"
     }
 
-    assert {:ok, artifact} = UTAU.render(utau_req([note], opts))
+    {:ok, check_artifact} = UTAU.check(utau_req([note], opts))
+    checked = %{request: utau_req([note], opts), artifact: check_artifact, fingerprint: nil}
+    assert {:ok, artifact} = UTAU.render(checked)
     assert File.exists?(artifact.render["path"])
     assert artifact.render["sample_rate"] > 0
     assert artifact.render["duration"] > 0

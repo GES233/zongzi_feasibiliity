@@ -8,7 +8,8 @@ defmodule ZongziFeasibility.Engine do
   - `check/1`：params 校验 → 逐 segment 调 Python `project` 投影 →
     逐 intervention 调 `Declaration.Pitch.resolve` →
     `{:ok, %{projection, spills, resolved, conflicts}}`。
-  - `render/1`：check + 合并 resolved 得 applied 投影 → Python `visualize`
+  - `render/1`：消费 `checked_request`（已过 check 的 request + artifact +
+    fingerprint），合并 resolved 得 applied 投影 → Python `visualize`
     → artifact 加 `applied` / `path`。
 
   request 为 map（zongzi 契约，不用 struct）：`segments` 必填；常用
@@ -53,31 +54,27 @@ defmodule ZongziFeasibility.Engine do
   # ------------------------------------------------------------------
 
   @impl true
-  def render(%{segments: _} = req) do
-    with {:ok, artifact} <- check(req) do
-      applied = apply_resolved(artifact.projection, artifact.resolved)
+  def render(%{request: req, artifact: artifact} = _checked) do
+    applied = apply_resolved(artifact.projection, artifact.resolved)
 
-      body = %{
-        "action" => "visualize",
-        "baseline" => artifact.projection,
-        "applied" => applied,
-        "spills" => artifact.spills,
-        "notes" => req |> all_notes() |> Enum.map(&serialize_note/1),
-        "tempo_segments" => tempo_segments(req),
-        "sample_rate" => sample_rate(req),
-        "interventions" => serialize_interventions(req, artifact),
-        "output_dir" => opts(req)[:output_dir] || default_output_dir(),
-        "tag" => opts(req)[:tag] || "comparison"
-      }
+    body = %{
+      "action" => "visualize",
+      "baseline" => artifact.projection,
+      "applied" => applied,
+      "spills" => artifact.spills,
+      "notes" => req |> all_notes() |> Enum.map(&serialize_note/1),
+      "tempo_segments" => tempo_segments(req),
+      "sample_rate" => sample_rate(req),
+      "interventions" => serialize_interventions(req, artifact),
+      "output_dir" => opts(req)[:output_dir] || default_output_dir(),
+      "tag" => opts(req)[:tag] || "comparison"
+    }
 
-      case Python.run(body) do
-        {:ok, %{"path" => path}} -> {:ok, Map.merge(artifact, %{applied: applied, path: path})}
-        {:error, _} = err -> err
-      end
+    case Python.run(body) do
+      {:ok, %{"path" => path}} -> {:ok, Map.merge(artifact, %{applied: applied, path: path})}
+      {:error, _} = err -> err
     end
   end
-
-  def render(_req), do: {:error, :missing_segments}
 
   # ------------------------------------------------------------------
   # params 校验（gender / energy 全局旋钮，非 intervention）

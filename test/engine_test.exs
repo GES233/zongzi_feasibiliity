@@ -24,8 +24,11 @@ defmodule ZongziFeasibility.EngineTest do
       assert {:error, :missing_segments} = Engine.check(%{notes: []})
     end
 
-    test "render 缺 segments → {:error, :missing_segments}" do
-      assert {:error, :missing_segments} = Engine.render(%{})
+    test "render 消费 checked_request（经 check 验证后）" do
+      {:ok, artifact} = Engine.check(%{segments: []})
+      checked = %{request: %{segments: []}, artifact: artifact, fingerprint: nil}
+      assert {:ok, result} = Engine.render(checked)
+      assert result.projection == []
     end
 
     test "check 空 segments → 空投影，不触引擎" do
